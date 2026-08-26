@@ -1,15 +1,12 @@
 import type { Logger } from 'winston'
-import type { Manifest, ManifestImageEntry } from './manifest'
+import type { SplitOneOptions, SplitOneResult } from './split-one-file'
+import { fork } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { copyFile, mkdir } from 'node:fs/promises'
 import path from 'node:path'
-import { PDFDocument } from 'pdf-lib'
-import { pdf as pdfToImg } from 'pdf-to-img'
-import sharp from 'sharp'
-import { findPdfs, pageImageName } from './discover'
+import process from 'node:process'
+import { fileURLToPath } from 'node:url'
+import { findPdfs } from './discover'
 import { DEFAULT_TEMPLATE } from './filename-template'
-import { hashFile } from './hash'
-import { readManifest, writeManifest } from './manifest'
 
 export type SplitOptions = {
   /** Root folder or single PDF file to search. */
@@ -32,12 +29,75 @@ export type SplitResult = {
   pageCount: number
   images: string[]
   skipped: boolean
+  /** Set when this file's worker process crashed or errored; pageCount/images will be empty. */
+  failed?: boolean
+  errorMessage?: string
 }
 
-function folderNameFor(pdfPath: string): string {
-  const base = path.basename(pdfPath, path.extname(pdfPath))
-  return base
+// Resolve the worker script. Bundlers (tsdown/esbuild/rollup) inline
+// src/lib/*.ts into whichever entry file imports them, so there is no
+// standalone "split-worker.js" sitting next to this module's original
+// source path at runtime — import.meta.url-relative resolution breaks
+// under bundling. Instead, resolve relative to the actual running
+// entrypoint (process.argv[1], e.g. dist/cli.js), which the bundler
+// guarantees is a real file, and require the worker to be its own
+// explicit bundle entry (dist/split-worker.js) living alongside it.
+// In dev (tsx, unbundled), fall back to the .ts source next to this file.
+//
+// Worker heap ceiling: 1024MB default. Pages are rasterized and written
+// one at a time (no batching), so a single worker rarely needs more than
+// a few hundred MB even for large-page-size books; 1GB leaves headroom
+// without reserving multiple GB per file that's never used. Override with
+// PDFSLICE_WORKER_MAX_OLD_SPACE_MB if a specific PDF genuinely needs more.
+const WORKER_HEAP_MB = process.env.PDFSLICE_WORKER_MAX_OLD_SPACE_MB !== undefined
+  ? Number(process.env.PDFSLICE_WORKER_MAX_OLD_SPACE_MB)
+  : 1024
+
+function resolveWorkerPath(): { path: string, execArgv: string[] } {
+  const heapFlag = `--max-old-space-size=${WORKER_HEAP_MB}`
+  const candidates: Array<{ path: string, execArgv: string[] }> = []
+
+  // 1) Sibling of the actual running entrypoint (process.argv[1]) — correct
+  //    for flat single-directory bundles (tsdown/esbuild/rollup), where
+  //    split-worker is declared as its own bundle entry alongside cli.js.
+  if (process.argv[1] !== undefined) {
+    const entrypointDir = path.dirname(path.resolve(process.argv[1]))
+    candidates.push(
+      { path: path.join(entrypointDir, 'split-worker'), execArgv: [heapFlag] },
+      { path: path.join(entrypointDir, 'split-worker.cjs'), execArgv: [heapFlag] },
+    )
+  }
+
+  // 2) Sibling of *this compiled module's own location* — correct for
+  //    per-file compilers (tsc) that preserve the src/ directory structure
+  //    into dist/ (e.g. dist/lib/split.js next to dist/lib/split-worker.js),
+  //    where the entrypoint (dist/bin/cli.js) lives in a different folder.
+  const thisFileDir = path.dirname(fileURLToPath(import.meta.url))
+  candidates.push(
+    { path: path.join(thisFileDir, 'split-worker'), execArgv: [heapFlag] },
+    { path: path.join(thisFileDir, 'split-worker.cjs'), execArgv: [heapFlag] },
+  )
+
+  // 3) Dev fallback: running from source via tsx (no bundler/compiler
+  //    involved) — the worker's .ts source is a genuine sibling.
+  candidates.push({
+    path: path.join(thisFileDir, 'split-worker.ts'),
+    execArgv: ['--import', 'tsx', heapFlag],
+  })
+
+  const found = candidates.find(c => existsSync(c.path))
+  if (found)
+    return found
+
+  throw new Error(
+    `Could not locate split-worker script. Looked for:\n${
+      candidates.map(c => `  ${c.path}`).join('\n')
+    }\nIf you're using a bundler, make sure "src/lib/split-worker.ts" is its own entry point `
+    + `so it emits a standalone file (either next to your CLI entrypoint, or next to dist/lib/split.js).`,
+  )
 }
+
+const { path: WORKER_PATH, execArgv: WORKER_EXEC_ARGV } = resolveWorkerPath()
 
 export async function splitAll(opts: SplitOptions): Promise<SplitResult[]> {
   const {
@@ -53,115 +113,103 @@ export async function splitAll(opts: SplitOptions): Promise<SplitResult[]> {
   logger.info(`Found ${pdfs.length} PDF file(s) under ${input}`, { level })
 
   const results: SplitResult[] = []
-  for (const pdfPath of pdfs) {
-    results.push(await splitOne(pdfPath, { input, flatten, template, force, dryRun, logger }))
+  for (const [index, pdfPath] of pdfs.entries()) {
+    logger.info(`Processing PDF ${index + 1}/${pdfs.length}`, { pdfPath })
+    const result = await splitOneInWorker(
+      { pdfPath, input, flatten, template, force, dryRun },
+      logger,
+    )
+    results.push(result)
   }
+
+  const failedCount = results.filter(r => r.failed).length
+  if (failedCount > 0) {
+    logger.warn(`${failedCount} of ${pdfs.length} PDF(s) failed to split`, {
+      failed: results.filter(r => r.failed).map(r => r.pdf),
+    })
+  }
+
   return results
 }
 
-async function splitOne(
-  pdfPath: string,
-  ctx: {
-    input: string
-    flatten: boolean
-    template: string
-    force: boolean
-    dryRun: boolean
-    logger: Logger
-  },
+/**
+ * Runs splitOneFile for a single PDF in its own child process, so that a
+ * memory blowup (large/complex PDF) or any other crash in that process
+ * only affects this one file — the batch continues with the next PDF
+ * instead of the whole run dying.
+ */
+async function splitOneInWorker(
+  fileOpts: SplitOneOptions,
+  logger: Logger,
 ): Promise<SplitResult> {
-  const { flatten, template, force, dryRun, logger } = ctx
-  const baseName = folderNameFor(pdfPath)
-  const parentDir = flatten ? ctx.input : path.dirname(pdfPath)
-  const outputFolder = path.join(parentDir, baseName)
-  const destPdfPath = path.join(outputFolder, path.basename(pdfPath))
+  return new Promise((resolve) => {
+    const child = fork(WORKER_PATH, [], {
+      // Inherit stdio for visibility, but communicate the actual result
+      // over IPC (process.send/on('message')) rather than parsing stdout.
+      stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
+      execArgv: WORKER_EXEC_ARGV,
+    })
 
-  logger.info(`Processing ${pdfPath}`, { outputFolder })
+    let settled = false
+    const finish = (result: SplitResult) => {
+      if (settled)
+        return
+      settled = true
+      resolve(result)
+    }
 
-  // Skip re-splitting when the output folder already reflects this exact
-  // PDF (same content, same template) — avoids redundant rasterization
-  // work on repeated runs. --force bypasses this check.
-  if (!force && !dryRun && existsSync(destPdfPath)) {
-    const existingManifest = await readManifest(outputFolder)
-    if (existingManifest && existingManifest.filenameTemplate === template) {
-      const currentPdfHash = await hashFile(pdfPath)
-      if (existingManifest.sourcePdfHash === currentPdfHash) {
-        logger.info(`Already split, skipping`, { outputFolder })
-        return {
-          pdf: destPdfPath,
-          outputFolder,
-          pageCount: existingManifest.pageCount,
-          images: existingManifest.images.map(i => path.join(outputFolder, i.file)),
-          skipped: true,
-        }
+    child.on('message', (msg: { ok: true, result: SplitOneResult } | { ok: false, error: string }) => {
+      if (msg.ok) {
+        finish({ ...msg.result })
       }
-    }
-  }
+      else {
+        logger.error(`Failed to split PDF`, { pdfPath: fileOpts.pdfPath, error: msg.error })
+        finish({
+          pdf: fileOpts.pdfPath,
+          outputFolder: '',
+          pageCount: 0,
+          images: [],
+          skipped: false,
+          failed: true,
+          errorMessage: msg.error,
+        })
+      }
+    })
 
-  if (dryRun) {
-    logger.info(`[dry-run] would create folder ${outputFolder}`)
-    logger.info(`[dry-run] would move ${pdfPath} -> ${destPdfPath} (copy, original kept)`)
-    const doc = await PDFDocument.load(await (await import('node:fs/promises')).readFile(pdfPath))
-    const pageCount = doc.getPageCount()
-    for (let i = 1; i <= pageCount; i++) {
-      logger.info(`[dry-run] would create image ${pageImageName(baseName, i, template)}`)
-    }
-    return { pdf: pdfPath, outputFolder, pageCount, images: [], skipped: true }
-  }
+    child.on('error', (err) => {
+      logger.error(`Worker process error`, { pdfPath: fileOpts.pdfPath, error: err.message })
+      finish({
+        pdf: fileOpts.pdfPath,
+        outputFolder: '',
+        pageCount: 0,
+        images: [],
+        skipped: false,
+        failed: true,
+        errorMessage: err.message,
+      })
+    })
 
-  await mkdir(outputFolder, { recursive: true })
+    child.on('exit', (code, signal) => {
+      // A non-zero/signal exit without ever sending a result message means
+      // the process crashed outright (e.g. OOM kill) — treat as failure
+      // for this file and move on rather than losing the whole batch.
+      if (!settled) {
+        const reason = signal
+          ? `killed by signal ${signal} (likely out of memory)`
+          : `exited with code ${code}`
+        logger.error(`Worker process crashed`, { pdfPath: fileOpts.pdfPath, reason })
+        finish({
+          pdf: fileOpts.pdfPath,
+          outputFolder: '',
+          pageCount: 0,
+          images: [],
+          skipped: false,
+          failed: true,
+          errorMessage: reason,
+        })
+      }
+    })
 
-  // "Move" without deleting the original: copy into the new folder,
-  // overwriting any stale copy from a previous split. The original PDF
-  // at its source path is left untouched, per spec.
-  await copyFile(pdfPath, destPdfPath)
-
-  const pdfBytes = await (await import('node:fs/promises')).readFile(destPdfPath)
-  const doc = await PDFDocument.load(pdfBytes)
-  const pageCount = doc.getPageCount()
-
-  // Clear any page images left over from a previous split of this folder
-  // (e.g. the old PDF had more pages, or used a different template) so
-  // stale images never linger alongside the freshly generated set.
-  const { readdir: readdirFs, unlink } = await import('node:fs/promises')
-  const existingEntries = await readdirFs(outputFolder, { withFileTypes: true })
-  for (const entry of existingEntries) {
-    if (entry.isFile() && /\.jpe?g$/i.test(entry.name)) {
-      await unlink(path.join(outputFolder, entry.name))
-    }
-  }
-
-  const images: string[] = []
-  const imageEntries: ManifestImageEntry[] = []
-
-  const document = await pdfToImg(destPdfPath, { scale: 2 })
-  let pageNum = 1
-  for await (const image of document) {
-    const fileName = pageImageName(baseName, pageNum, template)
-    const imagePath = path.join(outputFolder, fileName)
-    // pdf-to-img always returns PNG-encoded bytes regardless of file
-    // extension; re-encode to real JPEG so the .jpg extension is accurate.
-    const jpegBuffer = await sharp(image).jpeg({ quality: 90 }).toBuffer()
-    await (await import('node:fs/promises')).writeFile(imagePath, jpegBuffer)
-    const fileHash = await hashFile(imagePath)
-    images.push(imagePath)
-    imageEntries.push({ file: fileName, page: pageNum, hash: fileHash })
-    logger.debug(`Wrote page image`, { fileName, page: pageNum })
-    pageNum++
-  }
-
-  const sourcePdfHash = await hashFile(destPdfPath)
-  const manifest: Manifest = {
-    version: 1,
-    sourcePdf: path.basename(destPdfPath),
-    sourcePdfHash,
-    pageCount,
-    images: imageEntries,
-    updatedAt: new Date().toISOString(),
-    filenameTemplate: template,
-  }
-  await writeManifest(outputFolder, manifest)
-
-  logger.info(`Split complete: ${pageCount} page(s)`, { outputFolder })
-  return { pdf: destPdfPath, outputFolder, pageCount, images, skipped: false }
+    child.send(fileOpts)
+  })
 }

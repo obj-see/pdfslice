@@ -13,6 +13,8 @@ export default defineConfig({
       reporter: ['text', 'json', 'html'],
       exclude: ['**/*.config.*', '**/dist/**', '**/node_modules/**'],
     },
+    testTimeout: 30000,
+    hookTimeout: 30000,
   },
   resolve: {
     alias: {

@@ -4,6 +4,7 @@ export default defineConfig({
   entry: {
     'cli': 'src/bin/cli.ts',
     'bash-complete': 'src/bin/bash-complete.ts',
+    'split-worker': 'src/lib/split-worker.ts',
   },
   format: ['esm', 'cjs'],
   dts: {
