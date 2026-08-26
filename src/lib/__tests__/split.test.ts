@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { mkdir, mkdtemp, readdir, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -156,5 +156,90 @@ describe('splitAll', () => {
 
     const manifest = await readManifest(path.join(root, 'sample'))
     expect(manifest?.filenameTemplate).toBe('{{page_number}}-{{filename}}.jpg')
+  })
+
+  it('skips re-splitting by default when the pdf was already split unchanged', async () => {
+    const pdfPath = path.join(root, 'sample.pdf')
+    await makeTestPdf(pdfPath, 2)
+
+    const first = await splitAll({ input: root, logger: silentLogger() })
+    expect(first[0]!.skipped).toBe(false)
+
+    const second = await splitAll({ input: root, logger: silentLogger() })
+    expect(second[0]!.skipped).toBe(true)
+    expect(second[0]!.pageCount).toBe(2)
+  })
+
+  it('does not rewrite image files when skipping an already-split pdf', async () => {
+    const pdfPath = path.join(root, 'sample.pdf')
+    await makeTestPdf(pdfPath, 2)
+    await splitAll({ input: root, logger: silentLogger() })
+
+    const imgPath = path.join(root, 'sample', 'sample.001.jpg')
+    const before = await stat(imgPath)
+    await new Promise(r => setTimeout(r, 20))
+
+    await splitAll({ input: root, logger: silentLogger() })
+
+    const after = await stat(imgPath)
+    expect(after.mtimeMs).toBe(before.mtimeMs)
+  })
+
+  it('re-splits when --force is passed even if unchanged', async () => {
+    const pdfPath = path.join(root, 'sample.pdf')
+    await makeTestPdf(pdfPath, 2)
+    await splitAll({ input: root, logger: silentLogger() })
+
+    const imgPath = path.join(root, 'sample', 'sample.001.jpg')
+    const before = await stat(imgPath)
+    await new Promise(r => setTimeout(r, 20))
+
+    const results = await splitAll({ input: root, force: true, logger: silentLogger() })
+    expect(results[0]!.skipped).toBe(false)
+
+    const after = await stat(imgPath)
+    expect(after.mtimeMs).toBeGreaterThan(before.mtimeMs)
+  })
+
+  it('re-splits automatically when the pdf content changes, even without --force', async () => {
+    const pdfPath = path.join(root, 'sample.pdf')
+    await makeTestPdf(pdfPath, 2)
+    await splitAll({ input: root, logger: silentLogger() })
+
+    // overwrite with a pdf that has a different page count
+    await makeTestPdf(pdfPath, 4)
+
+    const results = await splitAll({ input: root, logger: silentLogger() })
+    expect(results[0]!.skipped).toBe(false)
+    expect(results[0]!.pageCount).toBe(4)
+  })
+
+  it('clears stale page images when the re-split pdf has fewer pages', async () => {
+    const pdfPath = path.join(root, 'sample.pdf')
+    await makeTestPdf(pdfPath, 4)
+    await splitAll({ input: root, logger: silentLogger() })
+
+    await makeTestPdf(pdfPath, 2)
+    await splitAll({ input: root, force: true, logger: silentLogger() })
+
+    const files = (await readdir(path.join(root, 'sample'))).sort()
+    const jpgs = files.filter(f => f.endsWith('.jpg'))
+    expect(jpgs).toEqual(['sample.001.jpg', 'sample.002.jpg'])
+  })
+
+  it('re-splits when the template changes, even without --force', async () => {
+    const pdfPath = path.join(root, 'sample.pdf')
+    await makeTestPdf(pdfPath, 1)
+    await splitAll({ input: root, logger: silentLogger() })
+
+    const results = await splitAll({
+      input: root,
+      template: 'page-{{page_number}}.jpg',
+      logger: silentLogger(),
+    })
+    expect(results[0]!.skipped).toBe(false)
+
+    const files = await readdir(path.join(root, 'sample'))
+    expect(files).toContain('page-001.jpg')
   })
 })

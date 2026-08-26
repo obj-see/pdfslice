@@ -9,7 +9,7 @@ import sharp from 'sharp'
 import { findPdfs, pageImageName } from './discover'
 import { DEFAULT_TEMPLATE } from './filename-template'
 import { hashFile } from './hash'
-import { writeManifest } from './manifest'
+import { readManifest, writeManifest } from './manifest'
 
 export type SplitOptions = {
   /** Root folder or single PDF file to search. */
@@ -20,6 +20,8 @@ export type SplitOptions = {
   flatten?: boolean
   /** Filename template for page images. Default: "{{filename}}.{{page_number}}.jpg". */
   template?: string
+  /** Re-split even if the output folder's manifest already matches this PDF. Default false. */
+  force?: boolean
   dryRun?: boolean
   logger: Logger
 }
@@ -43,6 +45,7 @@ export async function splitAll(opts: SplitOptions): Promise<SplitResult[]> {
     level = 1,
     flatten = false,
     template = DEFAULT_TEMPLATE,
+    force = false,
     dryRun = false,
     logger,
   } = opts
@@ -51,7 +54,7 @@ export async function splitAll(opts: SplitOptions): Promise<SplitResult[]> {
 
   const results: SplitResult[] = []
   for (const pdfPath of pdfs) {
-    results.push(await splitOne(pdfPath, { input, flatten, template, dryRun, logger }))
+    results.push(await splitOne(pdfPath, { input, flatten, template, force, dryRun, logger }))
   }
   return results
 }
@@ -62,17 +65,38 @@ async function splitOne(
     input: string
     flatten: boolean
     template: string
+    force: boolean
     dryRun: boolean
     logger: Logger
   },
 ): Promise<SplitResult> {
-  const { flatten, template, dryRun, logger } = ctx
+  const { flatten, template, force, dryRun, logger } = ctx
   const baseName = folderNameFor(pdfPath)
   const parentDir = flatten ? ctx.input : path.dirname(pdfPath)
   const outputFolder = path.join(parentDir, baseName)
   const destPdfPath = path.join(outputFolder, path.basename(pdfPath))
 
   logger.info(`Processing ${pdfPath}`, { outputFolder })
+
+  // Skip re-splitting when the output folder already reflects this exact
+  // PDF (same content, same template) — avoids redundant rasterization
+  // work on repeated runs. --force bypasses this check.
+  if (!force && !dryRun && existsSync(destPdfPath)) {
+    const existingManifest = await readManifest(outputFolder)
+    if (existingManifest && existingManifest.filenameTemplate === template) {
+      const currentPdfHash = await hashFile(pdfPath)
+      if (existingManifest.sourcePdfHash === currentPdfHash) {
+        logger.info(`Already split, skipping`, { outputFolder })
+        return {
+          pdf: destPdfPath,
+          outputFolder,
+          pageCount: existingManifest.pageCount,
+          images: existingManifest.images.map(i => path.join(outputFolder, i.file)),
+          skipped: true,
+        }
+      }
+    }
+  }
 
   if (dryRun) {
     logger.info(`[dry-run] would create folder ${outputFolder}`)
@@ -87,15 +111,25 @@ async function splitOne(
 
   await mkdir(outputFolder, { recursive: true })
 
-  // "Move" without deleting the original: copy into the new folder.
-  // The original PDF at its source path is left untouched, per spec.
-  if (!existsSync(destPdfPath)) {
-    await copyFile(pdfPath, destPdfPath)
-  }
+  // "Move" without deleting the original: copy into the new folder,
+  // overwriting any stale copy from a previous split. The original PDF
+  // at its source path is left untouched, per spec.
+  await copyFile(pdfPath, destPdfPath)
 
   const pdfBytes = await (await import('node:fs/promises')).readFile(destPdfPath)
   const doc = await PDFDocument.load(pdfBytes)
   const pageCount = doc.getPageCount()
+
+  // Clear any page images left over from a previous split of this folder
+  // (e.g. the old PDF had more pages, or used a different template) so
+  // stale images never linger alongside the freshly generated set.
+  const { readdir: readdirFs, unlink } = await import('node:fs/promises')
+  const existingEntries = await readdirFs(outputFolder, { withFileTypes: true })
+  for (const entry of existingEntries) {
+    if (entry.isFile() && /\.jpe?g$/i.test(entry.name)) {
+      await unlink(path.join(outputFolder, entry.name))
+    }
+  }
 
   const images: string[] = []
   const imageEntries: ManifestImageEntry[] = []

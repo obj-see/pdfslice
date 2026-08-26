@@ -41,7 +41,7 @@ pnpm build
 The CLI exposes three commands:
 
 ```bash
-pdfslice split <input> [--level <n>] [--flatten] [--template <string>] [--dry-run] [--verbose] [--quiet]
+pdfslice split <input> [--level <n>] [--flatten] [--template <string>] [--force] [--dry-run] [--verbose] [--quiet]
 pdfslice gather <input> [--backup] [--dry-run] [--verbose] [--quiet]
 pdfslice check <input> [--verbose] [--quiet]
 ```
@@ -83,6 +83,18 @@ pdfslice split ./documents --flatten
 
 This places each generated output folder at the input root instead of beside each source PDF.
 
+#### Skip already-processed PDFs (default)
+
+By default, `split` skips a PDF entirely if its output folder already has a
+matching manifest (same PDF content hash, same template) — no
+re-rasterization on repeat runs.
+
+```bash
+pdfslice split ./documents --force
+```
+
+Pass `--force` to re-split anyway, even if nothing changed.
+
 #### Custom filename template
 
 ```bash
@@ -114,6 +126,7 @@ This reports missing pages without creating a PDF output.
 - `--dry-run`: preview actions without writing files
 - `--backup` (gather only, default on): back up the existing PDF before overwriting it; use `--no-backup` to skip
 - `--template <string>` (split only): custom page-image filename template
+- `--force` (split only): re-split even if the output already matches this PDF (skipped by default)
 - `--verbose`: print debug logging
 - `--quiet`: print only errors
 - `--log-file <path>`: write logs to JSON as well as console
