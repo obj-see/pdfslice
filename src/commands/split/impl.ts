@@ -41,7 +41,11 @@ export async function splitImpl(
       process.exitCode = 1
   }
   catch (err) {
-    logger.error('Split failed', { input, ...getProgress(), error: describeError(err) })
+    logger.error('Split failed', {
+      input,
+      ...getProgress(),
+      error: describeError(err),
+    })
     process.exitCode = 1
   }
   finally {

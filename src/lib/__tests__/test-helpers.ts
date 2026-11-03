@@ -10,12 +10,21 @@ export async function makeTestPdf(
   const doc = await PDFDocument.create()
   for (let i = 0; i < pageCount; i++) {
     const page = doc.addPage([200, 200])
-    page.drawText(`Page ${i + 1}`, { x: 20, y: 100, size: 18, color: rgb(0, 0, 0) })
+    page.drawText(`Page ${i + 1}`, {
+      x: 20,
+      y: 100,
+      size: 18,
+      color: rgb(0, 0, 0),
+    })
   }
   await writeFile(filePath, await doc.save())
 }
 
 /** A winston logger that discards everything, for quiet test output. */
 export function silentLogger() {
-  return createLogger({ transports: [new transports.Console({ silent: true })] })
+  return createLogger({
+    transports: [
+      new transports.Console({ silent: true }),
+    ],
+  })
 }

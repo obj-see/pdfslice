@@ -40,12 +40,22 @@ process.once('message', async (opts: SplitOneOptions) => {
   try {
     const result = await splitOneFile(opts, (progress) => {
       last = progress
-      void send({ progress: { ...progress, rssMb: rssMb() } })
+      void send({
+        progress: {
+          ...progress,
+          rssMb: rssMb(),
+        },
+      })
     })
     reply = { ok: true, result }
   }
   catch (err) {
-    reply = { ok: false, error: describeError(err), stage: last.stage, page: last.page }
+    reply = {
+      ok: false,
+      error: describeError(err),
+      stage: last.stage,
+      page: last.page,
+    }
   }
   await send(reply)
   process.exit(0)

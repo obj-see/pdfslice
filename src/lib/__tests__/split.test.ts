@@ -22,7 +22,10 @@ describe('splitAll', () => {
     const pdfPath = path.join(root, 'sample.pdf')
     await makeTestPdf(pdfPath, 3)
 
-    const results = await splitAll({ input: root, logger: silentLogger() })
+    const results = await splitAll({
+      input: root,
+      logger: silentLogger(),
+    })
 
     expect(results).toHaveLength(1)
     const [result] = results
@@ -51,7 +54,10 @@ describe('splitAll', () => {
     const pdfPath = path.join(root, 'doc.pdf')
     await makeTestPdf(pdfPath, 2)
 
-    await splitAll({ input: root, logger: silentLogger() })
+    await splitAll({
+      input: root,
+      logger: silentLogger(),
+    })
 
     const manifest = await readManifest(path.join(root, 'doc'))
     expect(manifest).not.toBeNull()
@@ -67,7 +73,10 @@ describe('splitAll', () => {
     await mkdir(sub)
     await makeTestPdf(path.join(sub, 'nested.pdf'), 1)
 
-    const results = await splitAll({ input: root, logger: silentLogger() })
+    const results = await splitAll({
+      input: root,
+      logger: silentLogger(),
+    })
     expect(results).toHaveLength(1)
     expect(results[0]!.pdf).toContain('top.pdf')
   }, 30000)
@@ -78,7 +87,11 @@ describe('splitAll', () => {
     await mkdir(sub)
     await makeTestPdf(path.join(sub, 'nested.pdf'), 1)
 
-    const results = await splitAll({ input: root, level: 2, logger: silentLogger() })
+    const results = await splitAll({
+      input: root,
+      level: 2,
+      logger: silentLogger(),
+    })
     expect(results).toHaveLength(2)
   }, 30000)
 
@@ -103,7 +116,12 @@ describe('splitAll', () => {
     const pdfPath = path.join(sub, 'nested.pdf')
     await makeTestPdf(pdfPath, 1)
 
-    await splitAll({ input: root, level: 2, flatten: true, logger: silentLogger() })
+    await splitAll({
+      input: root,
+      level: 2,
+      flatten: true,
+      logger: silentLogger(),
+    })
 
     expect(existsSync(path.join(root, 'nested'))).toBe(true)
     expect(existsSync(path.join(sub, 'nested'))).toBe(false)
@@ -112,7 +130,10 @@ describe('splitAll', () => {
   it('produces real jpeg-encoded bytes, not mislabeled png', async () => {
     const pdfPath = path.join(root, 'sample.pdf')
     await makeTestPdf(pdfPath, 1)
-    await splitAll({ input: root, logger: silentLogger() })
+    await splitAll({
+      input: root,
+      logger: silentLogger(),
+    })
 
     const imgPath = path.join(root, 'sample', 'sample.001.jpg')
     const buf = await (await import('node:fs/promises')).readFile(imgPath)
@@ -162,10 +183,16 @@ describe('splitAll', () => {
     const pdfPath = path.join(root, 'sample.pdf')
     await makeTestPdf(pdfPath, 2)
 
-    const first = await splitAll({ input: root, logger: silentLogger() })
+    const first = await splitAll({
+      input: root,
+      logger: silentLogger(),
+    })
     expect(first[0]!.skipped).toBe(false)
 
-    const second = await splitAll({ input: root, logger: silentLogger() })
+    const second = await splitAll({
+      input: root,
+      logger: silentLogger(),
+    })
     expect(second[0]!.skipped).toBe(true)
     expect(second[0]!.pageCount).toBe(2)
   }, 30000)
@@ -173,13 +200,19 @@ describe('splitAll', () => {
   it('does not rewrite image files when skipping an already-split pdf', async () => {
     const pdfPath = path.join(root, 'sample.pdf')
     await makeTestPdf(pdfPath, 2)
-    await splitAll({ input: root, logger: silentLogger() })
+    await splitAll({
+      input: root,
+      logger: silentLogger(),
+    })
 
     const imgPath = path.join(root, 'sample', 'sample.001.jpg')
     const before = await stat(imgPath)
     await new Promise(r => setTimeout(r, 20))
 
-    await splitAll({ input: root, logger: silentLogger() })
+    await splitAll({
+      input: root,
+      logger: silentLogger(),
+    })
 
     const after = await stat(imgPath)
     expect(after.mtimeMs).toBe(before.mtimeMs)
@@ -188,13 +221,20 @@ describe('splitAll', () => {
   it('re-splits when --force is passed even if unchanged', async () => {
     const pdfPath = path.join(root, 'sample.pdf')
     await makeTestPdf(pdfPath, 2)
-    await splitAll({ input: root, logger: silentLogger() })
+    await splitAll({
+      input: root,
+      logger: silentLogger(),
+    })
 
     const imgPath = path.join(root, 'sample', 'sample.001.jpg')
     const before = await stat(imgPath)
     await new Promise(r => setTimeout(r, 20))
 
-    const results = await splitAll({ input: root, force: true, logger: silentLogger() })
+    const results = await splitAll({
+      input: root,
+      force: true,
+      logger: silentLogger(),
+    })
     expect(results[0]!.skipped).toBe(false)
 
     const after = await stat(imgPath)
@@ -204,12 +244,18 @@ describe('splitAll', () => {
   it('re-splits automatically when the pdf content changes, even without --force', async () => {
     const pdfPath = path.join(root, 'sample.pdf')
     await makeTestPdf(pdfPath, 2)
-    await splitAll({ input: root, logger: silentLogger() })
+    await splitAll({
+      input: root,
+      logger: silentLogger(),
+    })
 
     // overwrite with a pdf that has a different page count
     await makeTestPdf(pdfPath, 4)
 
-    const results = await splitAll({ input: root, logger: silentLogger() })
+    const results = await splitAll({
+      input: root,
+      logger: silentLogger(),
+    })
     expect(results[0]!.skipped).toBe(false)
     expect(results[0]!.pageCount).toBe(4)
   }, 30000)
@@ -217,10 +263,17 @@ describe('splitAll', () => {
   it('clears stale page images when the re-split pdf has fewer pages', async () => {
     const pdfPath = path.join(root, 'sample.pdf')
     await makeTestPdf(pdfPath, 4)
-    await splitAll({ input: root, logger: silentLogger() })
+    await splitAll({
+      input: root,
+      logger: silentLogger(),
+    })
 
     await makeTestPdf(pdfPath, 2)
-    await splitAll({ input: root, force: true, logger: silentLogger() })
+    await splitAll({
+      input: root,
+      force: true,
+      logger: silentLogger(),
+    })
 
     const files = (await readdir(path.join(root, 'sample'))).sort()
     const jpgs = files.filter(f => f.endsWith('.jpg'))
@@ -230,7 +283,10 @@ describe('splitAll', () => {
   it('re-splits when the template changes, even without --force', async () => {
     const pdfPath = path.join(root, 'sample.pdf')
     await makeTestPdf(pdfPath, 1)
-    await splitAll({ input: root, logger: silentLogger() })
+    await splitAll({
+      input: root,
+      logger: silentLogger(),
+    })
 
     const results = await splitAll({
       input: root,
@@ -252,7 +308,10 @@ describe('splitAll', () => {
     const goodPdf = path.join(root, 'good.pdf')
     await makeTestPdf(goodPdf, 2)
 
-    const results = await splitAll({ input: root, logger: silentLogger() })
+    const results = await splitAll({
+      input: root,
+      logger: silentLogger(),
+    })
 
     expect(results).toHaveLength(2)
     const bad = results.find(r => r.pdf === badPdf)
@@ -268,7 +327,10 @@ describe('splitAll', () => {
     await writeFile(path.join(root, 'a-broken.pdf'), 'not a pdf')
     await makeTestPdf(path.join(root, 'b-good.pdf'), 2)
 
-    const results = await splitAll({ input: root, logger: silentLogger() })
+    const results = await splitAll({
+      input: root,
+      logger: silentLogger(),
+    })
 
     expect(results).toHaveLength(2)
     expect(results[0]!.failed).toBe(true)
@@ -283,7 +345,10 @@ describe('splitAll', () => {
     await makeTestPdf(path.join(root, 'b.pdf'), 1)
     await makeTestPdf(path.join(root, 'a.pdf'), 1)
 
-    const results = await splitAll({ input: root, logger: silentLogger() })
+    const results = await splitAll({
+      input: root,
+      logger: silentLogger(),
+    })
 
     expect(results.map(r => path.basename(r.pdf))).toEqual(['a.pdf', 'b.pdf'])
   }, 30000)
@@ -291,7 +356,10 @@ describe('splitAll', () => {
   it('does not report a crash when a big result is sent just before the worker exits', async () => {
     await makeTestPdf(path.join(root, 'book.pdf'), 80)
 
-    const results = await splitAll({ input: root, logger: silentLogger() })
+    const results = await splitAll({
+      input: root,
+      logger: silentLogger(),
+    })
 
     expect(results[0]!.failed).toBeUndefined()
     expect(results[0]!.pageCount).toBe(80)

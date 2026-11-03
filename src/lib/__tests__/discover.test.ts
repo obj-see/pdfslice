@@ -65,7 +65,10 @@ describe('findPdfs', () => {
     await writeFile(path.join(root, 'note.txt'), 'x')
     const found = await findPdfs(root)
     expect(found.sort()).toEqual(
-      [path.join(root, 'one.pdf'), path.join(root, 'two.pdf')].sort(),
+      [
+        path.join(root, 'one.pdf'),
+        path.join(root, 'two.pdf'),
+      ].sort(),
     )
   })
 
@@ -75,7 +78,9 @@ describe('findPdfs', () => {
     await mkdir(sub)
     await writeFile(path.join(sub, 'nested.pdf'), 'x')
     const found = await findPdfs(root, 1)
-    expect(found).toEqual([path.join(root, 'top.pdf')])
+    expect(found).toEqual([
+      path.join(root, 'top.pdf'),
+    ])
   })
 
   it('descends one level with level=2', async () => {
@@ -85,7 +90,10 @@ describe('findPdfs', () => {
     await writeFile(path.join(sub, 'nested.pdf'), 'x')
     const found = await findPdfs(root, 2)
     expect(found.sort()).toEqual(
-      [path.join(root, 'top.pdf'), path.join(sub, 'nested.pdf')].sort(),
+      [
+        path.join(root, 'top.pdf'),
+        path.join(sub, 'nested.pdf'),
+      ].sort(),
     )
   })
 
@@ -118,7 +126,10 @@ describe('findImagesDeep', () => {
     await writeFile(path.join(sub, 'c.png'), 'x') // should be ignored
     const found = await findImagesDeep(root)
     expect(found.sort()).toEqual(
-      [path.join(root, 'a.jpg'), path.join(sub, 'b.jpeg')].sort(),
+      [
+        path.join(root, 'a.jpg'),
+        path.join(sub, 'b.jpeg'),
+      ].sort(),
     )
   })
 

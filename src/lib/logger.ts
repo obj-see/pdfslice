@@ -27,12 +27,16 @@ export function formatLine(
   message: string,
   meta: Record<string, unknown> = {},
 ): string {
-  const extra = Object.keys(meta).length ? ` ${JSON.stringify(meta)}` : ''
+  const extra = Object.keys(meta).length
+    ? ` ${JSON.stringify(meta)}`
+    : ''
   return `${COLOR_BY_LEVEL[level]}${level}${RESET}: ${message}${extra}`
 }
 
 export function createLogger(opts: LoggerOptions = {}): winston.Logger {
-  const level = opts.quiet ? 'error' : opts.verbose ? 'debug' : 'info'
+  const level = opts.quiet
+    ? 'error'
+    : opts.verbose ? 'debug' : 'info'
 
   const transports: winston.transport[] = [
     new winston.transports.Console({

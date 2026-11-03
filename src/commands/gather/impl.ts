@@ -41,12 +41,18 @@ export async function gatherImpl(
 
     const failed = reports.filter(r => r.action === 'failed')
     if (failed.length > 0) {
-      logger.error(`${failed.length} unit(s) failed`, { folders: failed.map(r => r.folder) })
+      logger.error(`${failed.length} unit(s) failed`, {
+        folders: failed.map(r => r.folder),
+      })
       process.exitCode = 1
     }
   }
   catch (err) {
-    logger.error('Gather failed', { input, ...getProgress(), error: describeError(err) })
+    logger.error('Gather failed', {
+      input,
+      ...getProgress(),
+      error: describeError(err),
+    })
     process.exitCode = 1
   }
   finally {

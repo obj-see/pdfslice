@@ -3,7 +3,9 @@ export const DEFAULT_TEMPLATE = '{{filename}}.{{page_number}}.jpg'
 const PLACEHOLDER_PATTERN = /\{\{(filename|page_number)\}\}/g
 
 function padPageNumber(page: number): string {
-  return page < 1000 ? String(page).padStart(3, '0') : String(page)
+  return page < 1000
+    ? String(page).padStart(3, '0')
+    : String(page)
 }
 
 function escapeRegExp(str: string): string {
@@ -53,7 +55,9 @@ export function compileTemplate(template: string): FilenameTemplate {
       if (!m)
         return null
       const raw = m[1]
-      return raw !== undefined ? parseInt(raw, 10) : null
+      return raw !== undefined
+        ? parseInt(raw, 10)
+        : null
     },
   }
 }

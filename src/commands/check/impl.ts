@@ -26,7 +26,9 @@ export async function checkImpl(
 
     const failed = reports.filter(r => r.action === 'failed')
     if (failed.length > 0) {
-      logger.error(`${failed.length} unit(s) failed`, { folders: failed.map(r => r.folder) })
+      logger.error(`${failed.length} unit(s) failed`, {
+        folders: failed.map(r => r.folder),
+      })
       process.exitCode = 1
     }
 
@@ -40,7 +42,11 @@ export async function checkImpl(
     }
   }
   catch (err) {
-    logger.error('Check failed', { input, ...getProgress(), error: describeError(err) })
+    logger.error('Check failed', {
+      input,
+      ...getProgress(),
+      error: describeError(err),
+    })
     process.exitCode = 1
   }
   finally {

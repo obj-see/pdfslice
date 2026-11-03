@@ -18,9 +18,14 @@ export function describeError(err: unknown, depth = 0): ErrorDetail {
     if (code !== undefined)
       detail.code = code
     if (err.cause !== undefined) {
-      detail.cause = depth < 3 ? describeError(err.cause, depth + 1) : String(err.cause)
+      detail.cause = depth < 3
+        ? describeError(err.cause, depth + 1)
+        : String(err.cause)
     }
     return detail
   }
-  return { name: typeof err, message: String(err) }
+  return {
+    name: typeof err,
+    message: String(err),
+  }
 }

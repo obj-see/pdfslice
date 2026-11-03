@@ -64,8 +64,14 @@ function resolveWorkerPath(): { path: string, execArgv: string[] } {
   if (process.argv[1] !== undefined) {
     const entrypointDir = path.dirname(path.resolve(process.argv[1]))
     candidates.push(
-      { path: path.join(entrypointDir, 'split-worker'), execArgv: [heapFlag] },
-      { path: path.join(entrypointDir, 'split-worker.cjs'), execArgv: [heapFlag] },
+      {
+        path: path.join(entrypointDir, 'split-worker'),
+        execArgv: [heapFlag],
+      },
+      {
+        path: path.join(entrypointDir, 'split-worker.cjs'),
+        execArgv: [heapFlag],
+      },
     )
   }
 
@@ -75,8 +81,14 @@ function resolveWorkerPath(): { path: string, execArgv: string[] } {
   //    where the entrypoint (dist/bin/cli.js) lives in a different folder.
   const thisFileDir = path.dirname(fileURLToPath(import.meta.url))
   candidates.push(
-    { path: path.join(thisFileDir, 'split-worker'), execArgv: [heapFlag] },
-    { path: path.join(thisFileDir, 'split-worker.cjs'), execArgv: [heapFlag] },
+    {
+      path: path.join(thisFileDir, 'split-worker'),
+      execArgv: [heapFlag],
+    },
+    {
+      path: path.join(thisFileDir, 'split-worker.cjs'),
+      execArgv: [heapFlag],
+    },
   )
 
   // 3) Dev fallback: running from source via tsx (no bundler/compiler
@@ -117,7 +129,14 @@ export async function splitAll(opts: SplitOptions): Promise<SplitResult[]> {
   for (const [index, pdfPath] of pdfs.entries()) {
     logger.info(`Processing PDF ${index + 1}/${pdfs.length}`, { pdfPath })
     const result = await splitOneInWorker(
-      { pdfPath, input, flatten, template, force, dryRun },
+      {
+        pdfPath,
+        input,
+        flatten,
+        template,
+        force,
+        dryRun,
+      },
       logger,
     )
     results.push(result)
@@ -237,7 +256,10 @@ async function splitOneInWorker(
     })
 
     child.on('error', (err) => {
-      logger.error(`Worker process error`, { pdfPath, error: describeError(err) })
+      logger.error(`Worker process error`, {
+        pdfPath,
+        error: describeError(err),
+      })
       fail(err.message)
     })
 

@@ -13,7 +13,9 @@ describe('describeError', () => {
   })
 
   it('walks the cause chain', () => {
-    const err = new Error('outer', { cause: new TypeError('inner') })
+    const err = new Error('outer', {
+      cause: new TypeError('inner'),
+    })
     expect(describeError(err).cause).toMatchObject({ name: 'TypeError', message: 'inner' })
   })
 

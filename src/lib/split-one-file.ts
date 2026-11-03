@@ -80,7 +80,9 @@ export async function splitOneFile(
 ): Promise<SplitOneResult> {
   const { pdfPath, input, flatten, template, force, dryRun } = opts
   const baseName = folderNameFor(pdfPath)
-  const parentDir = flatten ? input : path.dirname(pdfPath)
+  const parentDir = flatten
+    ? input
+    : path.dirname(pdfPath)
   const outputFolder = path.join(parentDir, baseName)
   const destPdfPath = path.join(outputFolder, path.basename(pdfPath))
 
@@ -110,7 +112,13 @@ export async function splitOneFile(
     const probe = await openPdfForRasterizing(pdfPath, { scale: RENDER_SCALE })
     const pageCount = probe.pageCount
     await probe.destroy()
-    return { pdf: pdfPath, outputFolder, pageCount, images: [], skipped: true }
+    return {
+      pdf: pdfPath,
+      outputFolder,
+      pageCount,
+      images: [],
+      skipped: true,
+    }
   }
 
   onProgress({ stage: 'mkdir' })
@@ -172,7 +180,13 @@ export async function splitOneFile(
       const fileHash = createHash('sha256').update(jpegBuffer).digest('hex')
       images.push(imagePath)
       imageEntries.push({ file: fileName, page: pageNum, hash: fileHash })
-      onProgress({ stage: 'write', page: pageNum, pageCount, fileName, bytes: jpegBuffer.length })
+      onProgress({
+        stage: 'write',
+        page: pageNum,
+        pageCount,
+        fileName,
+        bytes: jpegBuffer.length,
+      })
     }
   }
   finally {
@@ -194,5 +208,11 @@ export async function splitOneFile(
   }
   await writeManifest(outputFolder, manifest)
 
-  return { pdf: destPdfPath, outputFolder, pageCount, images, skipped: false }
+  return {
+    pdf: destPdfPath,
+    outputFolder,
+    pageCount,
+    images,
+    skipped: false,
+  }
 }

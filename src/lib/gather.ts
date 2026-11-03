@@ -63,7 +63,11 @@ async function findUnitFolders(root: string): Promise<string[]> {
       return // don't descend further into a recognized unit
     }
     const entries = (await readdir(dir, { withFileTypes: true }))
-      .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+      .sort((a, b) => (a.name < b.name
+        ? -1
+        : a.name > b.name
+          ? 1
+          : 0))
     for (const e of entries) {
       if (e.isDirectory())
         await walk(path.join(dir, e.name))
@@ -264,7 +268,12 @@ async function gatherOne(folder: string, opts: GatherOptions): Promise<UnitRepor
     const bytes = await readFile(entry.path)
     const img = await outDoc.embedJpg(bytes)
     const pageDoc = outDoc.addPage([img.width, img.height])
-    pageDoc.drawImage(img, { x: 0, y: 0, width: img.width, height: img.height })
+    pageDoc.drawImage(img, {
+      x: 0,
+      y: 0,
+      width: img.width,
+      height: img.height,
+    })
   }
   const outBytes = await outDoc.save()
   track('write-pdf')

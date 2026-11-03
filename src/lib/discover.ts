@@ -12,7 +12,9 @@ import { compileTemplate, DEFAULT_TEMPLATE } from './filename-template'
 export async function findPdfs(root: string, level = 1): Promise<string[]> {
   const st = await stat(root)
   if (st.isFile()) {
-    return root.toLowerCase().endsWith('.pdf') ? [root] : []
+    return root.toLowerCase().endsWith('.pdf')
+      ? [root]
+      : []
   }
 
   const results: string[] = []

@@ -57,7 +57,9 @@ describe('manifest', () => {
       sourcePdf: 'sample.pdf',
       sourcePdfHash: 'hash-old',
       pageCount: 1,
-      images: [{ file: 'sample.001.jpg', page: 1, hash: 'h1' }],
+      images: [
+        { file: 'sample.001.jpg', page: 1, hash: 'h1' },
+      ],
       updatedAt: '2026-01-01T00:00:00.000Z',
       filenameTemplate: '{{filename}}.{{page_number}}.jpg',
     }

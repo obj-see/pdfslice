@@ -21,14 +21,20 @@ describe('gatherAll', () => {
   async function splitFixture(pageCount: number) {
     const pdfPath = path.join(root, 'sample.pdf')
     await makeTestPdf(pdfPath, pageCount)
-    await splitAll({ input: root, logger: silentLogger() })
+    await splitAll({
+      input: root,
+      logger: silentLogger(),
+    })
     return path.join(root, 'sample')
   }
 
   it('overwrites the pdf in place on the first run (no separate .gathered.pdf)', async () => {
     const unitFolder = await splitFixture(3)
 
-    const reports = await gatherAll({ input: root, logger: silentLogger() })
+    const reports = await gatherAll({
+      input: root,
+      logger: silentLogger(),
+    })
 
     expect(reports).toHaveLength(1)
     expect(reports[0]!.action).toBe('created')
@@ -38,33 +44,51 @@ describe('gatherAll', () => {
 
   it('skips recreating the pdf when nothing changed', async () => {
     await splitFixture(2)
-    await gatherAll({ input: root, logger: silentLogger() })
+    await gatherAll({
+      input: root,
+      logger: silentLogger(),
+    })
 
-    const second = await gatherAll({ input: root, logger: silentLogger() })
+    const second = await gatherAll({
+      input: root,
+      logger: silentLogger(),
+    })
     expect(second[0]!.action).toBe('skipped-unchanged')
   })
 
   it('reports missing pages and still rebuilds when an image is removed', async () => {
     const unitFolder = await splitFixture(3)
-    await gatherAll({ input: root, logger: silentLogger() })
+    await gatherAll({
+      input: root,
+      logger: silentLogger(),
+    })
 
     await unlink(path.join(unitFolder, 'sample.002.jpg'))
 
-    const reports = await gatherAll({ input: root, logger: silentLogger() })
+    const reports = await gatherAll({
+      input: root,
+      logger: silentLogger(),
+    })
     expect(reports[0]!.missingPages).toEqual([2])
     expect(reports[0]!.action).toBe('created')
   })
 
   it('updates the pdf\'s mtime after content changes', async () => {
     const unitFolder = await splitFixture(2)
-    await gatherAll({ input: root, logger: silentLogger() })
+    await gatherAll({
+      input: root,
+      logger: silentLogger(),
+    })
     const outputPdf = path.join(unitFolder, 'sample.pdf')
     const firstStat = await stat(outputPdf)
 
     await new Promise(r => setTimeout(r, 20))
     await unlink(path.join(unitFolder, 'sample.001.jpg'))
 
-    await gatherAll({ input: root, logger: silentLogger() })
+    await gatherAll({
+      input: root,
+      logger: silentLogger(),
+    })
 
     const secondStat = await stat(outputPdf)
     expect(secondStat.mtimeMs).toBeGreaterThanOrEqual(firstStat.mtimeMs)
@@ -102,10 +126,16 @@ describe('gatherAll', () => {
 
   it('backs up the previous pdf before overwriting on change (default on)', async () => {
     const unitFolder = await splitFixture(2)
-    await gatherAll({ input: root, logger: silentLogger() })
+    await gatherAll({
+      input: root,
+      logger: silentLogger(),
+    })
 
     await unlink(path.join(unitFolder, 'sample.001.jpg'))
-    await gatherAll({ input: root, logger: silentLogger() })
+    await gatherAll({
+      input: root,
+      logger: silentLogger(),
+    })
 
     const files = await readdir(unitFolder)
     const backups = files.filter(f => f.includes('.bak-'))
@@ -114,10 +144,18 @@ describe('gatherAll', () => {
 
   it('skips backup when backup:false is passed', async () => {
     const unitFolder = await splitFixture(2)
-    await gatherAll({ input: root, backup: false, logger: silentLogger() })
+    await gatherAll({
+      input: root,
+      backup: false,
+      logger: silentLogger(),
+    })
 
     await unlink(path.join(unitFolder, 'sample.001.jpg'))
-    await gatherAll({ input: root, backup: false, logger: silentLogger() })
+    await gatherAll({
+      input: root,
+      backup: false,
+      logger: silentLogger(),
+    })
 
     const files = await readdir(unitFolder)
     const backups = files.filter(f => f.includes('.bak-'))
@@ -127,17 +165,26 @@ describe('gatherAll', () => {
   it('does not mistake the original source-directory pdf for a unit folder', async () => {
     await splitFixture(1)
 
-    const reports = await gatherAll({ input: root, logger: silentLogger() })
+    const reports = await gatherAll({
+      input: root,
+      logger: silentLogger(),
+    })
     expect(reports).toHaveLength(1)
     expect(reports[0]!.folder).toBe(path.join(root, 'sample'))
   })
 
   it('resolves the source pdf from the manifest across repeated runs with backups present', async () => {
     const unitFolder = await splitFixture(1)
-    await gatherAll({ input: root, logger: silentLogger() })
+    await gatherAll({
+      input: root,
+      logger: silentLogger(),
+    })
 
     await unlink(path.join(unitFolder, 'sample.001.jpg'))
-    await gatherAll({ input: root, logger: silentLogger() })
+    await gatherAll({
+      input: root,
+      logger: silentLogger(),
+    })
 
     const files = await readdir(unitFolder)
     expect(files).toContain('sample.pdf')
@@ -151,7 +198,10 @@ describe('gatherAll', () => {
     expect(existsSync(manifestPath)).toBe(true)
     await unlink(path.join(unitFolder, 'sample.pdf'))
 
-    const reports = await gatherAll({ input: root, logger: silentLogger() })
+    const reports = await gatherAll({
+      input: root,
+      logger: silentLogger(),
+    })
     expect(reports).toHaveLength(1)
     expect(reports[0]!.action).toBe('missing-source')
   })
@@ -165,7 +215,10 @@ describe('gatherAll', () => {
       logger: silentLogger(),
     })
 
-    const reports = await gatherAll({ input: root, logger: silentLogger() })
+    const reports = await gatherAll({
+      input: root,
+      logger: silentLogger(),
+    })
     expect(reports[0]!.action).toBe('created')
     expect(reports[0]!.missingPages).toEqual([])
     expect(reports[0]!.foundImages).toBe(3)
@@ -182,7 +235,10 @@ describe('gatherAll', () => {
 
     await unlink(path.join(root, 'sample', 'page-002.jpg'))
 
-    const reports = await gatherAll({ input: root, logger: silentLogger() })
+    const reports = await gatherAll({
+      input: root,
+      logger: silentLogger(),
+    })
     expect(reports[0]!.missingPages).toEqual([2])
   })
 
@@ -190,8 +246,16 @@ describe('gatherAll', () => {
     const unitFolder = await splitFixture(3)
     await unlink(path.join(unitFolder, 'sample.002.jpg'))
 
-    const first = await gatherAll({ input: root, backup: false, logger: silentLogger() })
-    const second = await gatherAll({ input: root, backup: false, logger: silentLogger() })
+    const first = await gatherAll({
+      input: root,
+      backup: false,
+      logger: silentLogger(),
+    })
+    const second = await gatherAll({
+      input: root,
+      backup: false,
+      logger: silentLogger(),
+    })
 
     // the overwritten pdf has 2 pages, but the expected count stays 3
     expect(first[0]!.missingPages).toEqual([2])
@@ -203,7 +267,11 @@ describe('gatherAll', () => {
     await unlink(path.join(unitFolder, 'sample.001.jpg'))
     await unlink(path.join(unitFolder, 'sample.002.jpg'))
 
-    const reports = await gatherAll({ input: root, backup: false, logger: silentLogger() })
+    const reports = await gatherAll({
+      input: root,
+      backup: false,
+      logger: silentLogger(),
+    })
 
     expect(reports[0]!.action).toBe('no-images')
   })
