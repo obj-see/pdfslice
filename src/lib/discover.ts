@@ -12,7 +12,9 @@ import { compileTemplate, DEFAULT_TEMPLATE } from './filename-template'
 export async function findPdfs(root: string, level = 1): Promise<string[]> {
   const st = await stat(root)
   if (st.isFile()) {
-    return root.toLowerCase().endsWith('.pdf') ? [root] : []
+    return root.toLowerCase().endsWith('.pdf')
+      ? [root]
+      : []
   }
 
   const results: string[] = []
@@ -31,7 +33,8 @@ export async function findPdfs(root: string, level = 1): Promise<string[]> {
   }
 
   await walk(root, 1)
-  return results
+  // readdir order is filesystem-dependent; sort so both CLIs process the same order.
+  return results.sort()
 }
 
 /**
@@ -55,7 +58,7 @@ export async function findImagesDeep(root: string): Promise<string[]> {
   }
 
   await walk(root)
-  return results
+  return results.sort()
 }
 
 /**

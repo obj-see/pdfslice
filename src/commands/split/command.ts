@@ -4,6 +4,7 @@ export type SplitFlags = {
   level: number
   flatten: boolean
   template: string
+  force: boolean
   dryRun: boolean
   verbose: boolean
   quiet: boolean
@@ -42,6 +43,12 @@ export const splitCommand = buildCommand({
         brief:
           'Page image filename template. Placeholders: {{filename}}, {{page_number}}. Must contain exactly one {{page_number}}.',
         default: '{{filename}}.{{page_number}}.jpg',
+      },
+      force: {
+        kind: 'boolean',
+        brief:
+          'Re-split even if the output folder already matches this PDF (skipped by default)',
+        default: false,
       },
       dryRun: {
         kind: 'boolean',

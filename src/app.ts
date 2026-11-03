@@ -1,4 +1,5 @@
 import { buildApplication, buildRouteMap } from '@stricli/core'
+import pkg from '../package.json' with { type: 'json' }
 import { checkCommand } from './commands/check/command'
 import { gatherCommand } from './commands/gather/command'
 import { splitCommand } from './commands/split/command'
@@ -17,6 +18,6 @@ const routes = buildRouteMap({
 export const app = buildApplication(routes, {
   name: 'pdfslice',
   versionInfo: {
-    currentVersion: '0.1.0',
+    currentVersion: pkg.version,
   },
 })

@@ -16,7 +16,13 @@ export default antfu(
 
       'ts/consistent-type-definitions': ['error', 'type'],
       'no-param-reassign': 'off',
-      'style/spaced-comment': ['warn', 'always', { markers: ['/'] }],
+      'style/spaced-comment': [
+        'warn',
+        'always',
+        {
+          markers: ['/'],
+        },
+      ],
     },
   },
 )
