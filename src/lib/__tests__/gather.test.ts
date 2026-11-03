@@ -185,4 +185,26 @@ describe('gatherAll', () => {
     const reports = await gatherAll({ input: root, logger: silentLogger() })
     expect(reports[0]!.missingPages).toEqual([2])
   })
+
+  it('keeps reporting a missing page after a partial gather overwrote the pdf', async () => {
+    const unitFolder = await splitFixture(3)
+    await unlink(path.join(unitFolder, 'sample.002.jpg'))
+
+    const first = await gatherAll({ input: root, backup: false, logger: silentLogger() })
+    const second = await gatherAll({ input: root, backup: false, logger: silentLogger() })
+
+    // the overwritten pdf has 2 pages, but the expected count stays 3
+    expect(first[0]!.missingPages).toEqual([2])
+    expect(second[0]!.missingPages).toEqual([2])
+  })
+
+  it('does not overwrite the pdf when no page image is left', async () => {
+    const unitFolder = await splitFixture(2)
+    await unlink(path.join(unitFolder, 'sample.001.jpg'))
+    await unlink(path.join(unitFolder, 'sample.002.jpg'))
+
+    const reports = await gatherAll({ input: root, backup: false, logger: silentLogger() })
+
+    expect(reports[0]!.action).toBe('no-images')
+  })
 })

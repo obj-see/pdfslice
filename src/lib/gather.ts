@@ -5,10 +5,10 @@ import { readdir, readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { PDFDocument } from 'pdf-lib'
 import { findImagesDeep, parsePageFromImageName } from './discover'
+import { describeError, getProgress, setProgress } from './failure'
 import { DEFAULT_TEMPLATE } from './filename-template'
 import { hashFile } from './hash'
 import {
-
   manifestPathFor,
   readManifest,
   writeManifest,
@@ -32,7 +32,16 @@ export type UnitReport = {
   foundImages: number
   missingPages: number[]
   outputPdf?: string
-  action: 'created' | 'skipped-unchanged' | 'would-create' | 'missing-source' | 'check-only'
+  action:
+    | 'created'
+    | 'skipped-unchanged'
+    | 'would-create'
+    | 'missing-source'
+    | 'check-only'
+    | 'no-images'
+    | 'failed'
+  /** Set when this unit failed; the run continues with the next unit. */
+  error?: string
 }
 
 /**
@@ -48,12 +57,13 @@ async function findUnitFolders(root: string): Promise<string[]> {
 
   const units: string[] = []
   async function walk(dir: string): Promise<void> {
-    const entries = await readdir(dir, { withFileTypes: true })
     const hasManifest = existsSync(manifestPathFor(dir))
     if (hasManifest) {
       units.push(dir)
       return // don't descend further into a recognized unit
     }
+    const entries = (await readdir(dir, { withFileTypes: true }))
+      .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
     for (const e of entries) {
       if (e.isDirectory())
         await walk(path.join(dir, e.name))
@@ -68,15 +78,35 @@ export async function gatherAll(opts: GatherOptions): Promise<UnitReport[]> {
   opts.logger.info(`Found ${units.length} unit folder(s) under ${opts.input}`)
 
   const reports: UnitReport[] = []
-  for (const folder of units) {
-    reports.push(await gatherOne(folder, opts))
+  for (const [index, folder] of units.entries()) {
+    opts.logger.info(`Processing unit ${index + 1}/${units.length}`, { folder })
+    try {
+      reports.push(await gatherOne(folder, opts))
+    }
+    catch (err) {
+      // One bad unit must not abort the rest, and the error must say where it died.
+      const { stage } = getProgress()
+      const detail = describeError(err)
+      opts.logger.error('Failed to gather unit', { folder, stage, error: detail })
+      reports.push({
+        folder,
+        sourcePdf: null,
+        pageCount: null,
+        foundImages: 0,
+        missingPages: [],
+        action: 'failed',
+        error: detail.message,
+      })
+    }
   }
   return reports
 }
 
 async function gatherOne(folder: string, opts: GatherOptions): Promise<UnitReport> {
   const { logger, dryRun = false, checkOnly = false, backup = true } = opts
+  const track = (stage: string): void => setProgress({ folder, stage })
 
+  track('read-manifest')
   const manifest = await readManifest(folder)
   if (!manifest) {
     logger.warn(`No manifest found in unit folder`, { folder })
@@ -106,12 +136,14 @@ async function gatherOne(folder: string, opts: GatherOptions): Promise<UnitRepor
     }
   }
 
-  const pdfBytes = await readFile(sourcePdfPath)
-  const doc = await PDFDocument.load(pdfBytes)
-  const pageCount = doc.getPageCount()
+  // Expected page count is what split recorded (from the renderer that made the
+  // images). Re-parsing the PDF with another library can disagree on odd files,
+  // and after a partial gather the overwritten PDF no longer has every page.
+  const pageCount = manifest.pageCount
 
   const template = manifest.filenameTemplate ?? DEFAULT_TEMPLATE
 
+  track('scan-images')
   const imagePaths = await findImagesDeep(folder)
   const foundPages = new Set<number>()
   for (const imgPath of imagePaths) {
@@ -151,6 +183,7 @@ async function gatherOne(folder: string, opts: GatherOptions): Promise<UnitRepor
 
   // Decide whether to (re)build the combined PDF, comparing the manifest's
   // recorded image hashes against the current on-disk images.
+  track('hash-images')
   const currentHashes = await Promise.all(
     imagePaths
       .filter(p => parsePageFromImageName(path.basename(p), template) !== null)
@@ -170,9 +203,21 @@ async function gatherOne(folder: string, opts: GatherOptions): Promise<UnitRepor
   // Output overwrites the source PDF in place, per spec.
   const outputPdfPath = sourcePdfPath
 
+  // Overwriting the source with an empty PDF would destroy it.
+  if (currentHashes.length === 0) {
+    logger.warn(`No page images found, skipping PDF creation`, { folder })
+    return {
+      folder,
+      sourcePdf: sourcePdfPath,
+      pageCount,
+      foundImages: 0,
+      missingPages,
+      action: 'no-images',
+    }
+  }
+
   const unchanged
     = !!(manifest.gatheredAt ?? '')
-      && manifest.pageCount === pageCount
       && manifest.images.length === currentHashes.length
       && manifest.images.every((entry, i) => currentHashes[i]?.hash === entry.hash)
 
@@ -204,6 +249,7 @@ async function gatherOne(folder: string, opts: GatherOptions): Promise<UnitRepor
 
   // Back up the existing PDF before overwriting it (default on; --no-backup to skip).
   if (backup) {
+    track('backup')
     const backupPath = path.join(
       folder,
       `${path.basename(outputPdfPath, '.pdf')}.bak-${Date.now()}.pdf`,
@@ -212,6 +258,7 @@ async function gatherOne(folder: string, opts: GatherOptions): Promise<UnitRepor
     logger.info(`Backed up previous PDF`, { backupPath })
   }
 
+  track('build-pdf')
   const outDoc = await PDFDocument.create()
   for (const entry of currentHashes) {
     const bytes = await readFile(entry.path)
@@ -220,8 +267,10 @@ async function gatherOne(folder: string, opts: GatherOptions): Promise<UnitRepor
     pageDoc.drawImage(img, { x: 0, y: 0, width: img.width, height: img.height })
   }
   const outBytes = await outDoc.save()
+  track('write-pdf')
   await (await import('node:fs/promises')).writeFile(outputPdfPath, outBytes)
 
+  track('write-manifest')
   await writeManifest(folder, {
     version: 1,
     sourcePdf: manifest.sourcePdf,
@@ -233,7 +282,11 @@ async function gatherOne(folder: string, opts: GatherOptions): Promise<UnitRepor
     filenameTemplate: template,
   } satisfies Manifest)
 
-  logger.info(`PDF overwritten`, { outputPdf: outputPdfPath })
+  logger.info(`PDF overwritten`, {
+    outputPdf: outputPdfPath,
+    pageCount: currentHashes.length,
+    bytes: outBytes.length,
+  })
   return {
     folder,
     sourcePdf: sourcePdfPath,

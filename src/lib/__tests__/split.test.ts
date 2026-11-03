@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { mkdir, mkdtemp, readdir, rm, stat } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -263,4 +263,38 @@ describe('splitAll', () => {
     expect(good?.pageCount).toBe(2)
     expect(existsSync(path.join(root, 'good', 'good.001.jpg'))).toBe(true)
   }, 30000)
+
+  it('keeps going after a broken pdf and reports where it failed', async () => {
+    await writeFile(path.join(root, 'a-broken.pdf'), 'not a pdf')
+    await makeTestPdf(path.join(root, 'b-good.pdf'), 2)
+
+    const results = await splitAll({ input: root, logger: silentLogger() })
+
+    expect(results).toHaveLength(2)
+    expect(results[0]!.failed).toBe(true)
+    expect(results[0]!.errorMessage).toBeDefined()
+    expect(results[1]!.failed).toBeUndefined()
+    expect(results[1]!.pageCount).toBe(2)
+    // no manifest for the failed pdf: gather/check treat it as not split
+    expect(existsSync(path.join(root, 'a-broken', '.pdfslice-manifest.json'))).toBe(false)
+  }, 30000)
+
+  it('processes pdfs in sorted order', async () => {
+    await makeTestPdf(path.join(root, 'b.pdf'), 1)
+    await makeTestPdf(path.join(root, 'a.pdf'), 1)
+
+    const results = await splitAll({ input: root, logger: silentLogger() })
+
+    expect(results.map(r => path.basename(r.pdf))).toEqual(['a.pdf', 'b.pdf'])
+  }, 30000)
+
+  it('does not report a crash when a big result is sent just before the worker exits', async () => {
+    await makeTestPdf(path.join(root, 'book.pdf'), 80)
+
+    const results = await splitAll({ input: root, logger: silentLogger() })
+
+    expect(results[0]!.failed).toBeUndefined()
+    expect(results[0]!.pageCount).toBe(80)
+    expect(results[0]!.images).toHaveLength(80)
+  }, 120000)
 })

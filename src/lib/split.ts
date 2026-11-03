@@ -1,10 +1,11 @@
 import type { Logger } from 'winston'
-import type { SplitOneOptions, SplitOneResult } from './split-one-file'
+import type { SplitOneOptions, SplitProgress, WorkerMessage } from './split-one-file'
 import { fork } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
+import { describeError } from './describe-error'
 import { findPdfs } from './discover'
 import { DEFAULT_TEMPLATE } from './filename-template'
 
@@ -110,7 +111,7 @@ export async function splitAll(opts: SplitOptions): Promise<SplitResult[]> {
     logger,
   } = opts
   const pdfs = await findPdfs(input, level)
-  logger.info(`Found ${pdfs.length} PDF file(s) under ${input}`, { level })
+  logger.info(`Found ${pdfs.length} PDF file(s) under ${input}`, { searchLevel: level })
 
   const results: SplitResult[] = []
   for (const [index, pdfPath] of pdfs.entries()) {
@@ -120,6 +121,29 @@ export async function splitAll(opts: SplitOptions): Promise<SplitResult[]> {
       logger,
     )
     results.push(result)
+
+    // The worker has no logger, so the outcome is logged here.
+    if (!result.failed) {
+      if (dryRun) {
+        logger.info(
+          `[dry-run] would split ${pdfPath} into ${result.outputFolder} (${result.pageCount} page(s))`,
+        )
+      }
+      else if (result.skipped) {
+        logger.info(`Skipped, already split`, {
+          pdfPath,
+          outputFolder: result.outputFolder,
+          pageCount: result.pageCount,
+        })
+      }
+      else {
+        logger.info(`Split complete: ${result.pageCount} page(s)`, {
+          pdfPath,
+          outputFolder: result.outputFolder,
+          pageCount: result.pageCount,
+        })
+      }
+    }
   }
 
   const failedCount = results.filter(r => r.failed).length
@@ -142,6 +166,8 @@ async function splitOneInWorker(
   fileOpts: SplitOneOptions,
   logger: Logger,
 ): Promise<SplitResult> {
+  const { pdfPath } = fileOpts
+
   return new Promise((resolve) => {
     const child = fork(WORKER_PATH, [], {
       // Inherit stdio for visibility, but communicate the actual result
@@ -150,64 +176,105 @@ async function splitOneInWorker(
       execArgv: WORKER_EXEC_ARGV,
     })
 
+    const startedAt = Date.now()
+    logger.debug(`Worker started`, { pdfPath, pid: child.pid })
+
     let settled = false
-    const finish = (result: SplitResult) => {
+    let last: SplitProgress = { stage: 'start' }
+    let exitInfo: { code: number | null, signal: NodeJS.Signals | null } | undefined
+    let disconnected = false
+
+    const finish = (result: SplitResult): void => {
       if (settled)
         return
       settled = true
       resolve(result)
     }
-
-    child.on('message', (msg: { ok: true, result: SplitOneResult } | { ok: false, error: string }) => {
-      if (msg.ok) {
-        finish({ ...msg.result })
-      }
-      else {
-        logger.error(`Failed to split PDF`, { pdfPath: fileOpts.pdfPath, error: msg.error })
-        finish({
-          pdf: fileOpts.pdfPath,
-          outputFolder: '',
-          pageCount: 0,
-          images: [],
-          skipped: false,
-          failed: true,
-          errorMessage: msg.error,
-        })
-      }
-    })
-
-    child.on('error', (err) => {
-      logger.error(`Worker process error`, { pdfPath: fileOpts.pdfPath, error: err.message })
+    const fail = (errorMessage: string): void =>
       finish({
-        pdf: fileOpts.pdfPath,
+        pdf: pdfPath,
         outputFolder: '',
         pageCount: 0,
         images: [],
         skipped: false,
         failed: true,
-        errorMessage: err.message,
+        errorMessage,
       })
+
+    child.on('message', (msg: WorkerMessage) => {
+      if ('progress' in msg) {
+        last = msg.progress
+        if (msg.progress.fileName !== undefined) {
+          logger.debug(`Wrote page image`, {
+            fileName: msg.progress.fileName,
+            page: msg.progress.page,
+            pageCount: msg.progress.pageCount,
+            bytes: msg.progress.bytes,
+            rssMb: msg.progress.rssMb,
+          })
+        }
+        return
+      }
+      if (msg.ok) {
+        logger.debug(`Worker finished`, {
+          pdfPath,
+          pid: child.pid,
+          durationMs: Date.now() - startedAt,
+          rssMb: last.rssMb,
+        })
+        finish({ ...msg.result })
+      }
+      else {
+        logger.error(`Failed to split PDF`, {
+          pdfPath,
+          stage: msg.stage,
+          page: msg.page,
+          rssMb: last.rssMb,
+          error: msg.error,
+        })
+        fail(msg.error.message)
+      }
     })
 
-    child.on('exit', (code, signal) => {
+    child.on('error', (err) => {
+      logger.error(`Worker process error`, { pdfPath, error: describeError(err) })
+      fail(err.message)
+    })
+
+    // A crash is only declared once the process has exited AND its IPC channel
+    // has closed: every message the worker managed to send is delivered before
+    // 'disconnect', so a result sent just before exit is never mistaken for a crash.
+    const onEnd = (): void => {
+      if (settled || exitInfo === undefined || !disconnected)
+        return
+      const { code, signal } = exitInfo
       // A non-zero/signal exit without ever sending a result message means
       // the process crashed outright (e.g. OOM kill) — treat as failure
       // for this file and move on rather than losing the whole batch.
-      if (!settled) {
-        const reason = signal
-          ? `killed by signal ${signal} (likely out of memory)`
-          : `exited with code ${code}`
-        logger.error(`Worker process crashed`, { pdfPath: fileOpts.pdfPath, reason })
-        finish({
-          pdf: fileOpts.pdfPath,
-          outputFolder: '',
-          pageCount: 0,
-          images: [],
-          skipped: false,
-          failed: true,
-          errorMessage: reason,
-        })
-      }
+      const reason = signal
+        ? `killed by signal ${signal} (likely out of memory)`
+        : `exited with code ${code}`
+      logger.error(`Worker process crashed`, {
+        pdfPath,
+        reason,
+        pid: child.pid,
+        durationMs: Date.now() - startedAt,
+        exitCode: code ?? undefined,
+        signal: signal ?? undefined,
+        stage: last.stage,
+        page: last.page,
+        pageCount: last.pageCount,
+        rssMb: last.rssMb,
+      })
+      fail(reason)
+    }
+    child.on('exit', (code, signal) => {
+      exitInfo = { code, signal }
+      onEnd()
+    })
+    child.on('disconnect', () => {
+      disconnected = true
+      onEnd()
     })
 
     child.send(fileOpts)

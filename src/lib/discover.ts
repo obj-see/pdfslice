@@ -31,7 +31,8 @@ export async function findPdfs(root: string, level = 1): Promise<string[]> {
   }
 
   await walk(root, 1)
-  return results
+  // readdir order is filesystem-dependent; sort so both CLIs process the same order.
+  return results.sort()
 }
 
 /**
@@ -55,7 +56,7 @@ export async function findImagesDeep(root: string): Promise<string[]> {
   }
 
   await walk(root)
-  return results
+  return results.sort()
 }
 
 /**

@@ -111,6 +111,8 @@ pdfslice gather ./documents/sample
 
 This rebuilds a combined PDF from the page images in the split unit folder and **overwrites the original PDF in place** (same filename, same location). A backup of the previous PDF (`sample.bak-<timestamp>.pdf`) is created first by default — pass `--no-backup` to skip it.
 
+Missing pages are counted against the page count that `split` recorded in the manifest, not by re-parsing the PDF, so a folder split by `pdfslice-py` is checked against the same number.
+
 If the PDF already reflects the current images (nothing has changed since the last gather), the project skips unnecessary regeneration.
 
 ### 3) Check for missing page images
@@ -130,6 +132,21 @@ This reports missing pages without creating a PDF output.
 - `--verbose`: print debug logging
 - `--quiet`: print only errors
 - `--log-file <path>`: write logs to JSON as well as console
+
+## Logging and errors
+
+Every line is `<level>: <message> <compact JSON>`, for example:
+
+```text
+info: Found 3 PDF file(s) under ./documents {"searchLevel":1}
+info: Processing PDF 2/3 {"pdfPath":"./documents/sample.pdf"}
+error: Worker process crashed {"pdfPath":"./documents/sample.pdf","reason":"killed by signal SIGKILL (likely out of memory)","signal":"SIGKILL","stage":"render","page":212,"pageCount":340,"rssMb":1480}
+```
+
+- Errors go to stderr, everything else to stdout. `--log-file` writes the same records as JSON lines.
+- Each PDF is split in its own worker process. A PDF that fails (worker error or crash) is logged with the `stage`, `page` and worker memory (`rssMb`) it died at, then the run continues with the next PDF and exits with code 1.
+- The worker only reports a crash after its IPC channel closed, so a result sent just before exit is never mistaken for a crash.
+- `pdfslice-py` prints the same lines with the same JSON keys, so output of both CLIs can be diffed.
 
 ## Example workflow
 
